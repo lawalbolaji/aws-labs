@@ -1,0 +1,540 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "create a private web service that is accessible via a public web cache and exposes a jump box for local ssh access",
+    "Parameters": {
+        "KeyName": {
+            "Type": "AWS::EC2::KeyPair::KeyName",
+            "Description": "This key pair must be created ahead of deploying this stack and will allow ssh access to the virtual machines"
+        },
+        "ImageId": {
+            "Type": "AWS::EC2::Image::Id",
+            "Default": " ami-0c101f26f147fa7fd"
+        },
+        "InstanceType": {
+            "Type": "String",
+            "Default": "t2.micro",
+            "AllowedValues": ["t2.micro", "t2.small", "t2.medium", "t3.micro"],
+            "Description": "Enter t2.micro, t2.small, t2.medium, or t3.micro. Default is t2.micro."
+        }
+    },
+    "Mappings": {},
+    "Resources": {
+        "VPC": {
+            "Type": "AWS::EC2::VPC",
+            "Properties": {
+                "CidrBlock": "10.0.0.0/16",
+                "EnableDnsHostnames": true,
+                "Tags": []
+            }
+        },
+
+        "IGW": {
+            "Type": "AWS::EC2::InternetGateway",
+            "Properties": {
+                "Tags": []
+            }
+        },
+        "VPCGatewayAttachment": {
+            "Type": "AWS::EC2::VPCGatewayAttachment",
+            "Properties": {
+                "VpcId": { "Ref": "VPC" },
+                "InternetGatewayId": { "Ref": "IGW" }
+            }
+        },
+
+        "public1a": {
+            "Type": "AWS::EC2::Subnet",
+            "Metadata": {
+                "_comment": "bastion host"
+            },
+            "Properties": {
+                "AvailabilityZone": "us-east-1a",
+                "VpcId": { "Ref": "VPC" },
+                "CidrBlock": "10.0.1.0/24",
+                "Tags": []
+            }
+        },
+
+        "public1aRouteTable": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": { "Ref": "VPC" },
+                "Tags": []
+            }
+        },
+        "public1aRouteTableAssoc": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "SubnetId": { "Ref": "public1a" },
+                "RouteTableId": { "Ref": "public1aRouteTable" }
+            }
+        },
+        "SSHBastionToInternetRoute": {
+            "Type": "AWS::EC2::Route",
+            "Properties": {
+                "RouteTableId": { "Ref": "public1aRouteTable" },
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "GatewayId": { "Ref": "IGW" }
+            },
+            "DependsOn": "VPCGatewayAttachment"
+        },
+
+        "public1aNetworkAcl": {
+            "Type": "AWS::EC2::NetworkAcl",
+            "Properties": {
+                "Tags": [],
+                "VpcId": { "Ref": "VPC" }
+            }
+        },
+        "public1aNetworkAclAssoc": {
+            "Type": "AWS::EC2::SubnetNetworkAclAssociation",
+            "Properties": {
+                "NetworkAclId": { "Ref": "public1aNetworkAcl" },
+                "SubnetId": { "Ref": "public1a" }
+            }
+        },
+
+        "AllowInboundSSHFromInternet": {
+            "Type": "AWS::EC2::NetworkAclEntry",
+            "Metadata": {
+                "_comment": "refer to https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers for IP protocol numbers"
+            },
+            "Properties": {
+                "CidrBlock": "0.0.0.0/0",
+                "Egress": false,
+                "NetworkAclId": { "Ref": "public1aNetworkAcl" },
+                "PortRange": {
+                    "From": "22",
+                    "To": "22"
+                },
+                "Protocol": 6,
+                "RuleAction": "allow",
+                "RuleNumber": 100
+            }
+        },
+        "AllowInboundEphemeralTCPFromVPC": {
+            "Type": "AWS::EC2::NetworkAclEntry",
+            "Metadata": {
+                "_comment": "the ssh daemon uses ephemeral ports for inbound connections when initiating ssh requests"
+            },
+            "Properties": {
+                "CidrBlock": "10.0.0.0/16",
+                "Egress": false,
+                "NetworkAclId": { "Ref": "public1aNetworkAcl" },
+                "PortRange": {
+                    "From": "1024",
+                    "To": "65535"
+                },
+                "Protocol": 6,
+                "RuleAction": "allow",
+                "RuleNumber": 200
+            }
+        },
+        "AllowOutboundSSHToVPC": {
+            "Type": "AWS::EC2::NetworkAclEntry",
+            "Properties": {
+                "CidrBlock": "10.0.0.0/16",
+                "Egress": true,
+                "NetworkAclId": { "Ref": "public1aNetworkAcl" },
+                "PortRange": {
+                    "From": "22",
+                    "To": "22"
+                },
+                "Protocol": 6,
+                "RuleAction": "allow",
+                "RuleNumber": 100
+            }
+        },
+        "AllowOutboundEphemeralTCPToVPC": {
+            "Type": "AWS::EC2::NetworkAclEntry",
+            "Metadata": {
+                "_comment": "the ssh daemon uses ephemeral ports for outbound connections when terminating ssh requests"
+            },
+            "Properties": {
+                "CidrBlock": "0.0.0.0/16",
+                "Egress": true,
+                "NetworkAclId": { "Ref": "public1aNetworkAcl" },
+                "PortRange": {
+                    "From": "22",
+                    "To": "22"
+                },
+                "Protocol": 6,
+                "RuleAction": "allow",
+                "RuleNumber": 200
+            }
+        },
+
+        "Public1b": {
+            "Type": "AWS::EC2::Subnet",
+            "Metadata": {
+                "_comment": "public web cache"
+            },
+            "Properties": {
+                "AvailabilityZone": "us-east-1b",
+                "VpcId": { "Ref": "VPC" },
+                "CidrBlock": "10.0.2.0/24",
+                "Tags": []
+            }
+        },
+
+        "Public1bRouteTable": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": { "Ref": "VPC" },
+                "Tags": []
+            }
+        },
+        "public1bRouteTableAssoc": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "SubnetId": { "Ref": "Public1b" },
+                "RouteTableId": { "Ref": "Public1bRouteTable" }
+            }
+        },
+        "WebCacheToInternetRoute": {
+            "Type": "AWS::EC2::Route",
+            "Properties": {
+                "RouteTableId": { "Ref": "Public1bRouteTable" },
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "GatewayId": { "Ref": "IGW" }
+            },
+            "DependsOn": "VPCGatewayAttachment"
+        },
+
+        "Public1bNetworkAcl": {
+            "Type": "AWS::EC2::NetworkAcl",
+            "Properties": {
+                "Tags": [],
+                "VpcId": { "Ref": "VPC" }
+            }
+        },
+        "Public1bNetworkAclAssoc": {
+            "Type": "AWS::EC2::SubnetNetworkAclAssociation",
+            "Properties": {
+                "NetworkAclId": { "Ref": "Public1bNetworkAcl" },
+                "SubnetId": { "Ref": "Public1b" }
+            }
+        },
+
+        "AllowInboundHTTPFromInternet": {
+            "Type": "AWS::EC2::NetworkAclEntry",
+            "Properties": {
+                "CidrBlock": "0.0.0.0/0",
+                "Egress": false,
+                "NetworkAclId": { "Ref": "public1bNetworkAcl" },
+                "PortRange": {
+                    "From": "80",
+                    "To": "80"
+                },
+                "Protocol": 6,
+                "RuleAction": "allow",
+                "RuleNumber": 100
+            }
+        },
+        "AllowInboundTCPFromVPCOnEphemeral": {
+            "Type": "AWS::EC2::NetworkAclEntry",
+            "Metadata": {
+                "_comment": "the web server uses ephemeral ports for inbound connections when initiating http requests"
+            },
+            "Properties": {
+                "CidrBlock": "10.0.0.0/16",
+                "Egress": false,
+                "NetworkAclId": { "Ref": "public1bNetworkAcl" },
+                "PortRange": {
+                    "From": "1024",
+                    "To": "65535"
+                },
+                "Protocol": 6,
+                "RuleAction": "allow",
+                "RuleNumber": 200
+            }
+        },
+        "AllowOutboundHTTPToVPC": {
+            "Type": "AWS::EC2::NetworkAclEntry",
+            "Properties": {
+                "CidrBlock": "10.0.0.0/16",
+                "Egress": true,
+                "NetworkAclId": { "Ref": "public1aNetworkAcl" },
+                "PortRange": {
+                    "From": "80",
+                    "To": "80"
+                },
+                "Protocol": 6,
+                "RuleAction": "allow",
+                "RuleNumber": 100
+            }
+        },
+        "AllowOutboundTCPToVPCOnEphemeral": {
+            "Type": "AWS::EC2::NetworkAclEntry",
+            "Metadata": {
+                "_comment": "the http server uses ephemeral ports for outbound connections when terminating http requests"
+            },
+            "Properties": {
+                "CidrBlock": "0.0.0.0/16",
+                "Egress": true,
+                "NetworkAclId": { "Ref": "public1aNetworkAcl" },
+                "PortRange": {
+                    "From": "1024",
+                    "To": "65535"
+                },
+                "Protocol": 6,
+                "RuleAction": "allow",
+                "RuleNumber": 200
+            }
+        },
+
+        "Private1b": {
+            "Type": "AWS::EC2::Subnet",
+            "Metadata": {
+                "_comment": "private web server"
+            },
+            "Properties": {
+                "AvailabilityZone": "us-east-1b",
+                "VpcId": { "Ref": "VPC" },
+                "CidrBlock": "10.0.3.0/24",
+                "Tags": []
+            }
+        },
+
+        "Private1bRouteTable": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": { "Ref": "VPC" },
+                "Tags": []
+            }
+        },
+        "Private1bRouteTableAssoc": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "SubnetId": { "Ref": "Private1b" },
+                "RouteTableId": { "Ref": "Private1bRouteTable" }
+            }
+        },
+
+        "BastionHostSG": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Metadata": {
+                "_comment": "to cross reference security groups in their egress rules use SecurityGroupEgress and SecurityGroupIngress resources",
+                "_sgEgressRef": "https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-securitygroupegress.html",
+                "_sgIngressRef": "https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-securitygroupingress.html"
+            },
+            "Properties": {
+                "GroupDescription": "Allow SSH to Bastion Host",
+                "SecurityGroupIngress": [
+                    {
+                        "CidrIp": "0.0.0.0/0",
+                        "FromPort": 22,
+                        "ToPort": 22,
+                        "IpProtocol": "tcp"
+                    }
+                ],
+                "VpcId": { "Ref": "VPC" },
+                "Tags": []
+            }
+        },
+
+        "BastionHost": {
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "KeyName": { "Ref": "KeyName" },
+                "ImageId": { "Ref": "ImageId" },
+                "InstanceType": { "Ref": "InstanceType" },
+                "NetworkInterface": {
+                    "AssociatePublicIpAddress": true,
+                    "DeleteOnTermination": true,
+                    "SubnetId": "String",
+                    "DeviceIndex": "0",
+                    "GroupSet": [{ "Ref": "public1a" }]
+                },
+                "Tags": []
+            }
+        },
+
+        "WebCacheSG": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "allow tcp traffic on all ports",
+                "SecurityGroupIngress": [
+                    {
+                        "CidrIp": "0.0.0.0/0",
+                        "IpProtocol": -1
+                    }
+                ],
+                "SecurityGroupEgress": [
+                    {
+                        "CidrIp": "0.0.0.0/0",
+                        "IpProtocol": -1
+                    }
+                ],
+                "VpcId": { "Ref": "VPC" },
+                "Tags": []
+            }
+        },
+
+        "WebCache": {
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": { "Ref": "ImageId" },
+                "InstanceType": { "Ref": "InstanceType" },
+                "KeyName": { "Ref": "KeyName" },
+                "NetworkInterfaces": [
+                    {
+                        "AssociatePublicIpAddress": "true",
+                        "DeleteOnTermination": "true",
+                        "SubnetId": { "Ref": "Public1b" },
+                        "DeviceIndex": "0",
+                        "GroupSet": [{ "Ref": "WebCacheSG" }]
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -ex\n",
+                                "yum -y install varnish-3.0.7\n",
+                                "cat > /etc/varnish/default.vcl << EOF\n",
+                                "backend default {\n",
+                                "  .host = \"",
+                                { "Fn::GetAtt": ["ApacheServer", "PrivateIp"] },
+                                "\";\n",
+                                "  .port = \"80\";\n",
+                                "}\n",
+                                "EOF\n",
+                                "sed -i.bak \"s/^VARNISH_LISTEN_PORT=.*/VARNISH_LISTEN_PORT=80/\" /etc/sysconfig/varnish\n",
+                                "service varnish start\n",
+                                "/opt/aws/bin/cfn-signal --stack ",
+                                { "Ref": "AWS::StackName" },
+                                " --resource VarnishServer --region ",
+                                { "Ref": "AWS::Region" },
+                                "\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "CreationPolicy": {
+                "ResourceSignal": {
+                    "Timeout": "PT5M"
+                }
+            },
+            "DependsOn": "VPCGatewayAttachment"
+        },
+
+        "WebServerSG": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "Allow HTTP and SSH traffic in local VPC",
+                "SecurityGroupIngress": [
+                    {
+                        "CidrIp": "10.0.0.0/16",
+                        "FromPort": 22,
+                        "ToPort": 22,
+                        "IpProtocol": "tcp"
+                    },
+                    {
+                        "CidrIp": "10.0.0.0/16",
+                        "FromPort": 80,
+                        "ToPort": 80,
+                        "IpProtocol": "tcp"
+                    }
+                ],
+                "VpcId": { "Ref": "VPC" },
+                "Tags": []
+            }
+        },
+
+        "WebServer": {
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "KeyName": { "Ref": "KeyName" },
+                "ImageId": { "Ref": "ImageId" },
+                "InstanceType": { "Ref": "InstanceType" },
+                "NetworkInterfaces": [
+                    {
+                        "AssociatePublicIpAddress": "false",
+                        "DeleteOnTermination": "true",
+                        "SubnetId": { "Ref": "Private1b" },
+                        "DeviceIndex": "0",
+                        "GroupSet": [{ "Ref": "WebServerSG" }]
+                    }
+                ],
+                "Tags": [],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            ["#!/bin/bash -ex\n", "yum -y install httpd24-2.4.12\n", "service httpd start\n"]
+                        ]
+                    }
+                }
+            }
+        },
+
+        "NATServerSG": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Metadata": {
+                "_comment": "IpProtocol -1 will allow all ip protocols on all ports"
+            },
+            "Properties": {
+                "GroupDescription": "allow tcp traffic on all ports",
+                "SecurityGroupEgress": [
+                    {
+                        "CidrIp": "0.0.0.0/0",
+                        "IpProtocol": -1
+                    }
+                ],
+                "VpcId": { "Ref": "VPC" },
+                "Tags": []
+            }
+        },
+
+        "NATServer": {
+            "Type": "AWS::EC2::Instance",
+            "Metadata": {
+                "_comment": "AWS provides a optimized image for NAT servers - ami-303b1458"
+            },
+            "Properties": {
+                "KeyName": { "Ref": "KeyName" },
+                "ImageId": "ami-303b1458",
+                "InstanceType": { "Ref": "InstanceType" },
+                "Tags": [],
+                "NetworkInterface": {
+                    "AssociatePublicIpAddress": "true",
+                    "DeleteOnTermination": "true",
+                    "SubnetId": { "Ref": "Public1b" },
+                    "DeviceIndex": "0",
+                    "GroupSet": [{ "Ref": "NATServerSG" }]
+                },
+                "SourceDestCheck": "false"
+            }
+        },
+
+        "WebServerToNATRoute": {
+            "Type": "AWS::EC2::Route",
+            "Properties": {
+                "RouteTableId": { "Ref": "Private1bRouteTable" },
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "GatewayId": { "Ref": "NATServer" }
+            }
+        }
+    },
+    "Outputs": {
+        "BastionHostPublicName": {
+            "Value": { "Fn::GetAtt": ["BastionHost", "PublicDnsName"] },
+            "Description": "connect via SSH as user ec2-user"
+        },
+        "WebCachePublicName": {
+            "Value": { "Fn::GetAtt": ["WebCache", "PublicDnsName"] },
+            "Description": "handle HTTP requests"
+        },
+        "WebCachePrivateIp": {
+            "Value": { "Fn::GetAtt": ["WebCache", "PrivateIp"] },
+            "Description": "connect via SSH from bastion host"
+        },
+        "WebServerPrivateIp": {
+            "Value": { "Fn::GetAtt": ["WebServer", "PrivateIp"] },
+            "Description": "connect via SSH from bastion host"
+        }
+    }
+}
