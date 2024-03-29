@@ -72,7 +72,7 @@
                                 "export REGION=",
                                 { "Ref": "AWS::Region" },
                                 "\n",
-                                "curl -s https://raw.githubusercontent.com/lawalbolaji/aws-labs/main/cloudformation/vpn-server/bin/setup-vpn.sh | bash -ex\n"
+                                "curl -s https://raw.githubusercontent.com/lawalbolaji/aws-utils/main/cloudformation/vpn-server/bin/setup-vpn.sh | bash -ex\n"
                             ]
                         ]
                     }
