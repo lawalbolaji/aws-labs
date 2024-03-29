@@ -1,0 +1,185 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Run hello world node.js server on one ec2 instance",
+    "Parameters": {
+        "SourceCodeUrl": {
+            "Type": "String",
+            "Description": "source url for your nodejs application"
+        },
+        "KeyPair": {
+            "Type": "AWS::EC2::KeyPair::KeyName",
+            "Description": "ssh key pair for login in to the ec2 instance"
+        }
+    },
+    "Resources": {
+        "Vpc": {
+            "Type": "AWS::EC2::VPC",
+            "Properties": {
+                "CidrBlock": "10.0.0.0/16",
+                "Tags": [
+                    {
+                        "Key": "Author",
+                        "Value": "cf-stack"
+                    }
+                ]
+            }
+        },
+        "PublicSubnet1a": {
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "AvailabilityZone": { "Fn::Select": ["0", { "Fn::GetAZs": "" }] },
+                "CidrBlock": "10.0.1.0/24",
+                "Tags": [
+                    {
+                        "Key": "Author",
+                        "Value": "cf-stack"
+                    }
+                ],
+                "VpcId": { "Ref": "Vpc" }
+            }
+        },
+        "ServerSg01": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupName": "server-sg-01",
+                "GroupDescription": "Security group for nest server",
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": 22,
+                        "ToPort": 22,
+                        "CidrIp": "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": 3000,
+                        "ToPort": 3000,
+                        "CidrIp": "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol": "icmp",
+                        "FromPort": "-1",
+                        "ToPort": "-1",
+                        "CidrIp": "0.0.0.0/0"
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Author",
+                        "Value": "cf-stack"
+                    }
+                ],
+                "VpcId": { "Ref": "Vpc" }
+            }
+        },
+        "VpcInternetGateway": {
+            "Type": "AWS::EC2::InternetGateway",
+            "Properties": {
+                "Tags": [
+                    {
+                        "Key": "Author",
+                        "Value": "cf-stack"
+                    }
+                ]
+            }
+        },
+        "VpcGatewayAttachment": {
+            "Type": "AWS::EC2::VPCGatewayAttachment",
+            "Properties": {
+                "InternetGatewayId": {
+                    "Fn::GetAtt": ["VpcInternetGateway", "InternetGatewayId"]
+                },
+                "VpcId": {
+                    "Ref": "Vpc"
+                }
+            }
+        },
+        "ServerRouteTable": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "Tags": [
+                    {
+                        "Key": "Author",
+                        "Value": "cf-stack"
+                    }
+                ],
+                "VpcId": {
+                    "Ref": "Vpc"
+                }
+            }
+        },
+        "ServerInternetRoute": {
+            "Type": "AWS::EC2::Route",
+            "Properties": {
+                "RouteTableId": {
+                    "Fn::GetAtt": ["ServerRouteTable", "RouteTableId"]
+                },
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "GatewayId": {
+                    "Ref": "VpcInternetGateway"
+                }
+            },
+            "DependsOn": "VpcGatewayAttachment"
+        },
+        "RouteTableAssociation": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "SubnetId": {
+                    "Ref": "PublicSubnet1a"
+                },
+                "RouteTableId": {
+                    "Ref": "ServerRouteTable"
+                }
+            }
+        },
+        "Server": {
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "AvailabilityZone": "us-east-1a",
+                "ImageId": "ami-0230bd60aa48260c6",
+                "InstanceType": "t2.micro",
+                "KeyName": { "Ref": "KeyPair" },
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -ex\n",
+                                "echo setting up platform dependencies\n",
+                                "sudo yum update -y\n",
+                                "sudo yum install git curl -y --allowerasing\n",
+                                "touch .bashrc\n",
+                                "curl https://raw.githubusercontent.com/nvm-sh/nvm/v0.35.3/install.sh | bash\n",
+                                "source .bashrc\n",
+                                "nvm install --lts\n",
+                                "echo platform dependencies installed\n",
+                                "mkdir product && cd product\n",
+                                "git clone ",
+                                { "Ref": "SourceCodeUrl" },
+                                " .\n",
+                                "npm install && npm run build && npm run start:prod\n"
+                            ]
+                        ]
+                    }
+                },
+                "NetworkInterfaces": [
+                    {
+                        "AssociatePublicIpAddress": "True",
+                        "DeleteOnTermination": "True",
+                        "SubnetId": { "Ref": "PublicSubnet1a" },
+                        "DeviceIndex": "0",
+                        "GroupSet": [{ "Ref": "ServerSg01" }]
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Author",
+                        "Value": "cf-stack"
+                    }
+                ]
+            },
+            "DependsOn": "VpcGatewayAttachment"
+        }
+    },
+    "Outputs": {}
+}

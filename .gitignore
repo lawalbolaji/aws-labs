@@ -1,5 +1,7 @@
-key-pairs
+.keys
 
 .vscode
 
 .DS_Store
+
+node_modules
