@@ -1,0 +1,16 @@
+.gallery {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.img-node {
+    width: 33%;
+    object-fit: contain;
+}
+
+.img-node img {
+    width: 300px;
+}

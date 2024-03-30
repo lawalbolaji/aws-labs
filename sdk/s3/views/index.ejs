@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S3 Gallery</title>
+
+    <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+
+<body>
+    <header>
+        <h1>S3 Gallery</h1>
+    </header>
+    <main>
+        <div>
+            <h1>Upload Pictures</h1>
+            <form action="/upload" method="post" enctype="multipart/form-data">
+                <input type="file" accept="image/png, image/jpg" multiple="false" name="picture" id="picture">
+                <button type="submit">Upload Image</button>
+            </form>
+        </div>
+        <div>
+            <h1>Images</h1>
+            <div class="gallery">
+                <% s3Images.forEach(({DocumentKey})=> { %>
+                    <div class="img-node">
+                        <img src="https://s3.amazonaws.com/<%= BucketName %>/<%= DocumentKey %>"
+                            alt="<%= DocumentKey %>" loading="lazy">
+
+                    </div>
+                    <% }); %>
+            </div>
+        </div>
+    </main>
+</body>
+
+</html>
