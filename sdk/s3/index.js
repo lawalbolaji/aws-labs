@@ -48,6 +48,7 @@ app.get("/", async (req, res) => {
         return res.status(500).send("error loading page");
     }
 
+    /* consider using s3-request-pre-signer to generate custom src links for user */
     return res.render("index", { s3Images, BucketName: bucket });
 });
 
@@ -62,7 +63,7 @@ app.post("/upload", upload.single("picture"), async (req, res) => {
 
     /* alternatively, setup streaming pipeline for image processing */
     try {
-        /* use sharp to resize image before uploading */
+        /* use @aws-sdk/lib-storage to stream larger files directly to s3 without storing the intermediate binary on server */
         await s3.send(putObjectCommand);
     } catch (error) {
         console.log(error);
